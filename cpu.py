@@ -31,6 +31,11 @@ def disasm(d: "DecodedInstr") -> str:
         return f"<unknown 0x{d.raw:08x}>"
 
 
+# Takes a bits-wide unsigned value and return its signed interpretation
+def sign_extend(value, bits) -> int:
+    sign_bit = 1 << (bits - 1)
+    return (value & (sign_bit -1)) - (value & sign_bit)
+
 # Instruction Format
 # opcode bits[6:0]
 # rd bits[11:7]
@@ -58,16 +63,15 @@ class DecodedInstr:
 
 # RISC-V 64 bit (little-endian)
 
-__REG_NUMBER__ = 32
-__REG_BIT_SIZE__ = 64
-__PC_BIT_SIZE__ = 64
-
-__MEMORY_SIZE__ = 1024 * 1024 * 128 # 128 Mib
+REGISTERS_COUNT = 32
+REGISTERS_BIT_SIZE = 64
+XMASK = (1 << 64) - 1 # 64 bit mask
+MEM_SIZE = 1024 * 1024 * 128 # 128 Mib
 
 
 class Memory:
     def __init__(self, preloaded_bytes=None):
-        self.size = __MEMORY_SIZE__
+        self.size = MEM_SIZE
         if not preloaded_bytes:
             self._data = [0] * self.size
         self._data = preloaded_bytes + ([0] * (self.size - len(preloaded_bytes)))
@@ -82,14 +86,14 @@ class Memory:
 class CPU:
     def __init__(self, memory):
         # init registers 
-        self.registers = [0] * (__REG_NUMBER__) # reg x0 - x31
+        self.registers = [0] * (REGISTERS_COUNT) # reg x0 - x31
         self.pc = 0
 
         # bound memory
         self.memory = memory
 
         # set stack pointer -> reg x2
-        self.registers[2] = __MEMORY_SIZE__ # stack grows backwards so -> start and the end of memory
+        self.registers[2] = MEM_SIZE # stack grows backwards so -> start and the end of memory
         
         # Counters for logging
         self.cycle = 0
@@ -108,8 +112,9 @@ class CPU:
 
     def _decode(self, mem_bytes) -> DecodedInstr:
         format_references = {
-            0b0010011: "I", # addi
-            0b0110011: "R", # add
+            0b0010011: "I",
+            0b0000011: "I",
+            0b0110011: "R",
         }
 
         def extract_bits(value: int, hi: int, lo: int) -> int:
@@ -124,10 +129,6 @@ class CPU:
             "rs2": lambda x : extract_bits(x, 24, 20),
             "funct7": lambda x : extract_bits(x, 31, 25)
         }
-
-        def sign_extend(value, bits) -> int:
-            sign_bit = 1 << (bits - 1)
-            return (value & (sign_bit -1)) - (value & sign_bit)
         
         # memory arrives as 4 distinct bytes -> 0xAA 0xBB 0xCC 0xDD
         # we don't read in 8 bit (1 bytes) chunks so we first need to join
@@ -165,11 +166,28 @@ class CPU:
         self.registers[d.rd] = self.registers[d.rs1] + self.registers[d.rs2]
         return
 
+    # R[rd] = {56'bM[](7),M[R[rs1]+imm](7:0)}
+    def _lb(self, d: DecodedInstr) -> None:
+        # In RISC-V there is no overflow exception
+        # Overflowed values get masked and are still valid addrs
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        byte = self.memory.load(addr, 1)
+        value = sign_extend(value, 8) & XMASK
+        if d.rd != 0: # x0 guard
+            self.registers[d.rd] = value
+
     def _execute(self, d: DecodedInstr) -> None:
-        
+        # key(opcode, funct3, funct7) 
         mnemonic_lookup = {
             (0x13, 0x00, None): self._addi,
-            (0x33, 0x00, 0x00): self._add
+            (0x33, 0x00, 0x00): self._add,
+            (0x03, 0x00, None): self._lb,
+            # (0x03, 0x01, None): self._lh,
+            # (0x03, 0x02, None): self._lw,
+            # (0x03, 0x03, None): self._ld,
+            # (0x03, 0x04, None): self._lbu,
+            # (0x03, 0x05, None): self._lhu,
+            # (0x03, 0x06, None): self._lwu
         }
 
         key = (d.opcode, d.funct3, d.funct7)

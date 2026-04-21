@@ -189,7 +189,7 @@ class CPU:
     def _lh(self, d: DecodedInstr) -> None:
         addr = (self.registers[d.rs1] + d.imm) & XMASK
         bytes_data = self.memory.load(addr, 2)
-        value = bytes_data[0] | bytes_data=[1] << 8
+        value = bytes_data[0] | bytes_data[1] << 8
         value = sign_extend(value, 16) & XMASK
         if d.rd != 0: # x0 guard
             self.registers[d.rd] = value

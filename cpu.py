@@ -35,6 +35,12 @@ def disasm(d: "DecodedInstr") -> str:
         return f"lw x{d.rd}, {d.imm}(x{d.rs1})"
     elif key == (0x03, 0x03, None):  # ld
         return f"ld x{d.rd}, {d.imm}(x{d.rs1})"
+    elif key == (0x03, 0x04, None):  # lbu
+        return f"lbu x{d.rd}, {d.imm}(x{d.rs1})"
+    elif key == (0x03, 0x05, None):  # lhu
+        return f"lhu x{d.rd}, {d.imm}(x{d.rs1})"
+    elif key == (0x03, 0x06, None):  # lwu
+        return f"lwu x{d.rd}, {d.imm}(x{d.rs1})"
     else:
         return f"<unknown 0x{d.raw:08x}>"
 
@@ -212,6 +218,29 @@ class CPU:
         if d.rd != 0: # x0 guard
             self.registers[d.rd] = value
 
+    # R[rd] = {56'b0,M[R[rs1]+imm](7:0)}
+    def _lbu(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        bytes_data = self.memory.load(addr, 1)
+        value = bytes_data[0]
+        if d.rd != 0: # x0 guard
+            self.registers[d.rd] = value
+
+    # R[rd] = {48'b0,M[R[rs1]+imm](15:0)}
+    def _lhu(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        bytes_data = self.memory.load(addr, 2)
+        value = bytes_data[0] | bytes_data[1] << 8
+        if d.rd != 0: # x0 guard
+            self.registers[d.rd] = value
+
+    # R[rd] = {32'b0,M[R[rs1]+imm](31:0)}
+    def _lwu(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        bytes_data = self.memory.load(addr, 4)
+        value = bytes_data[0] | bytes_data[1] << 8 | bytes_data[2] << 16 | bytes_data[3] << 24
+        if d.rd != 0: # x0 guard
+            self.registers[d.rd] = value
       
 
     def _execute(self, d: DecodedInstr) -> None:
@@ -223,9 +252,9 @@ class CPU:
             (0x03, 0x01, None): self._lh,
             (0x03, 0x02, None): self._lw,
             (0x03, 0x03, None): self._ld,
-            # (0x03, 0x04, None): self._lbu,
-            # (0x03, 0x05, None): self._lhu,
-            # (0x03, 0x06, None): self._lwu
+            (0x03, 0x04, None): self._lbu,
+            (0x03, 0x05, None): self._lhu,
+            (0x03, 0x06, None): self._lwu
         }
 
         key = (d.opcode, d.funct3, d.funct7)

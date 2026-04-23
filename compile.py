@@ -7,7 +7,7 @@ def compile_asm_to_bytes(file_path=str) -> bytes:
         out_path = out.name 
     try:
         subprocess.run(
-            args=f'/opt/homebrew/opt/llvm/bin/clang --target=riscv64 -march=rv64i -mabi=lp64 -nostdlib -O3 -c {file_path} -o {out_path}'.split(),
+            args=f'/opt/homebrew/opt/llvm/bin/clang --target=riscv64 -march=rv64i -mabi=lp64 -nostdlib -c {file_path} -o {out_path}'.split(),
             stderr=None,
             check=True
         )

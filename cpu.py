@@ -42,6 +42,14 @@ def disasm(d: "DecodedInstr") -> str:
         return f"lhu x{d.rd}, {d.imm}(x{d.rs1})"
     elif key == (0x03, 0x06, None):  # lwu
         return f"lwu x{d.rd}, {d.imm}(x{d.rs1})"
+    elif key == (0x23, 0x00, None):  # sb
+        return f"sb x{d.rs2}, {d.imm}(x{d.rs1})"
+    elif key == (0x23, 0x01, None):  # sh
+        return f"sh x{d.rs2}, {d.imm}(x{d.rs1})"
+    elif key == (0x23, 0x02, None):  # sw
+        return f"sw x{d.rs2}, {d.imm}(x{d.rs1})"
+    elif key == (0x23, 0x03, None):  # sd
+        return f"sd x{d.rs2}, {d.imm}(x{d.rs1})"
     else:
         return f"<unknown 0x{d.raw:08x}>"
 
@@ -115,6 +123,7 @@ class CPU:
             0b0010011: "I",
             0b0000011: "I",
             0b0110011: "R",
+            0b0100011: "S",
         }
 
         def extract_bits(value: int, hi: int, lo: int) -> int:
@@ -153,6 +162,14 @@ class CPU:
             d.rs2    = mem_layout_chunks["rs2"](raw)
             d.funct7 = mem_layout_chunks["funct7"](raw)
             # no immediate
+
+        if d.instruction_format == "S":
+            d.funct3    = mem_layout_chunks["funct3"](raw)
+            d.rs1       = mem_layout_chunks["rs1"](raw)
+            d.rs2       = mem_layout_chunks["rs2"](raw)
+            imm_lo      = extract_bits(raw, 11, 7)
+            imm_hi      = extract_bits(raw, 31, 25)
+            d.imm       = sign_extend((imm_hi << 5) | imm_lo, 12)
 
         return d
 
@@ -227,7 +244,50 @@ class CPU:
         value = bytes_data[0] | bytes_data[1] << 8 | bytes_data[2] << 16 | bytes_data[3] << 24
         if d.rd != 0: # x0 guard
             self.registers[d.rd] = value
-      
+
+    # M[R[rs1]+imm](7:0) = R[rs2](7:0) 
+    def _sb(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        value = self.registers[d.rs2] & 0xFF
+        self.memory.store(addr, 1, [value])
+
+    # M[R[rs1]+imm](15:0) = R[rs2](15:0) 
+    def _sh(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        value = self.registers[d.rs2] & 0xFFFF
+        bytes_array = [
+            value & ((1 << 8) - 1),
+            value >> 8
+        ]
+        self.memory.store(addr, 2, bytes_array)
+
+    # M[R[rs1]+imm](31:0) = R[rs2](31:0)
+    def _sw(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        value = self.registers[d.rs2] & 0xFFFFFFFF
+        bytes_array = [
+            value & ((1 << 8) - 1),
+            (value >> 8) & ((1 << 8) - 1),
+            (value >> 16) & ((1 << 8) - 1),
+            value >> 24
+        ]
+        self.memory.store(addr, 4, bytes_array)
+
+    # M[R[rs1]+imm](63:0) = R[rs2](63:0) 
+    def _sd(self, d: DecodedInstr) -> None:
+        addr = (self.registers[d.rs1] + d.imm) & XMASK
+        value = self.registers[d.rs2] & 0xFFFFFFFFFFFFFFFF
+        bytes_array = [
+            value & ((1 << 8) - 1),
+            (value >> 8) & ((1 << 8) - 1),
+            (value >> 16) & ((1 << 8) - 1),
+            (value >> 24) & ((1 << 8) - 1),
+            (value >> 32) & ((1 << 8) - 1),
+            (value >> 40) & ((1 << 8) - 1),
+            (value >> 48) & ((1 << 8) - 1),
+            value >> 56
+        ]
+        self.memory.store(addr, 8, bytes_array)
 
     def _execute(self, d: DecodedInstr) -> None:
         # key(opcode, funct3, funct7) 
@@ -240,7 +300,11 @@ class CPU:
             (0x03, 0x03, None): self._ld,
             (0x03, 0x04, None): self._lbu,
             (0x03, 0x05, None): self._lhu,
-            (0x03, 0x06, None): self._lwu
+            (0x03, 0x06, None): self._lwu,
+            (0x23, 0x00, None): self._sb,
+            (0x23, 0x01, None): self._sh,
+            (0x23, 0x02, None): self._sw,
+            (0x23, 0x03, None): self._sd,
         }
 
         key = (d.opcode, d.funct3, d.funct7)

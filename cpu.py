@@ -97,6 +97,9 @@ class CPU:
         self.registers = [0] * (REGISTERS_COUNT) # reg x0 - x31
         self.pc = 0
 
+        # Control Status Registers
+        self.csrs = [0] * 4096
+
         # bound memory
         self.memory = memory
 

@@ -31,6 +31,7 @@ Implemented Instructions
 - sw
 - sd
 - lui
+- auipc
 - csrrw
 - csrrs
 - csrrc

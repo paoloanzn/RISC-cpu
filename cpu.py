@@ -134,6 +134,7 @@ class CPU:
         # init registers 
         self.registers = [0] * (REGISTERS_COUNT) # reg x0 - x31
         self.pc = 0
+        self.pc_modified = False # track whenever pc is modified within an instructions execution -> avoid double increments
 
         # Control Status Registers
         self.csrs = [0] * 4096
@@ -179,6 +180,7 @@ class CPU:
             0b0100011: "S",
             0b0110111: "U",
             0b0010111: "U",
+            0b1101111: "UJ",
         }
 
         def extract_bits(value: int, hi: int, lo: int) -> int:
@@ -401,11 +403,15 @@ class CPU:
     # R[rd] = PC + {imm, 12'b0}
     def _auipc(self, d: DecodedInstr) -> None:
         value = d.imm << 12
-        old_pc = self.pc - 4 # needs the pc value pointing to the fetched instruction
+        old_pc = self.pc
         value = (old_pc + sign_extend(value, 32)) & XMASK 
         if d.rd != 0:
             self.registers[d.rd] = value
-        
+
+    # R[rd] = PC+4; PC = PC + {imm,1b'0}
+    def _jal(self, d: DecodedInstr) -> None:
+        pass
+
     def _execute(self, d: DecodedInstr) -> None:
         # key(opcode, funct3, funct7) 
         mnemonic_lookup = {
@@ -424,6 +430,7 @@ class CPU:
             (0x23, 0x03, None): self._sd,
             (0x37, None, None): self._lui,
             (0x17, None, None): self._auipc,
+            (0x6f, None, None): self._jal,
 
             # control status registers instructions
             (0x73, 0x01, None): self._csrrw,
@@ -437,7 +444,7 @@ class CPU:
         key = (d.opcode, d.funct3, d.funct7)
         if key not in mnemonic_lookup:
             raise IllegalInstruction(
-                pc=self.pc - 4,
+                pc=self.pc,
                 raw=d.raw,
                 reason=f"opcode 0x{d.opcode:02x} not in dispatch table"
             )
@@ -448,12 +455,11 @@ class CPU:
     def _cycle(self) -> None:
         self.cycle += 1
         self.instruction_count += 1
+        self.pc_modified = False
         
         # Fetch
         mem_bytes = self._fetch()
         logger.debug(f"[{self.cycle:06d}] FETCH  pc=0x{self.pc:08x}  bytes={[hex(x) for x in mem_bytes]}")
-
-        self.pc += 4 # move pc to the next instruction
 
         # Decode
         decoded_instruction = self._decode(mem_bytes)
@@ -461,7 +467,7 @@ class CPU:
 
         if decoded_instruction.raw == 0x00:
             raise IllegalInstruction(
-                pc=self.pc - 4,
+                pc=self.pc,
                 raw=decoded_instruction.raw,
                 reason="all zeros (NOP or halt)"
             )
@@ -469,6 +475,9 @@ class CPU:
         # Execute
         self._execute(decoded_instruction)
         logger.debug(f"[{self.cycle:06d}] EXEC")
+        
+        if not self.pc_modified:
+            self.pc += 4 # move pc to the next instruction
 
         # INFO level: one line per instruction with disasm + register delta
         if logger.isEnabledFor(logging.INFO):

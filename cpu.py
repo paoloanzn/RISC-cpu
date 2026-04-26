@@ -76,6 +76,8 @@ def disasm(d: "DecodedInstr") -> str:
         return f"lui x{d.rd}, {d.imm}"
     elif key == (0x17, None, None):  # auipc
         return f"auipc x{d.rd}, {d.imm}"
+    elif key == (0x6f, None, None):  # jal
+        return f"jal x{d.rd}, {d.imm}"
 
     # CSR instructions (opcode 0x73)
     elif key == (0x73, 0x1, None):     # csrrw
@@ -231,7 +233,16 @@ class CPU:
         if d.instruction_format == "U":
             d.rd     = mem_layout_chunks["rd"](raw)
             d.imm    = extract_bits(raw, 31, 12)
-            # no immediate
+
+        if d.instruction_format == "UJ":
+            d.rd        = mem_layout_chunks["rd"](raw)
+            imm_20      = extract_bits(raw, 31, 31) # 1 bit
+            imm_10_1    = extract_bits(raw, 30, 21) # 10 bits
+            imm_11      = extract_bits(raw, 20, 20) # 1 bit
+            imm_19_12   = extract_bits(raw, 19, 12) # 8 bits
+
+            imm       = (imm_20 << 20) | (imm_19_12 << 12) | (imm_11 << 11) | (imm_10_1 << 1)
+            d.imm     = sign_extend(imm, 21)
 
         return d
 
@@ -410,7 +421,11 @@ class CPU:
 
     # R[rd] = PC+4; PC = PC + {imm,1b'0}
     def _jal(self, d: DecodedInstr) -> None:
-        pass
+        if d.rd != 0:
+            self.registers[d.rd] = self.pc + 4
+        self.pc = (self.pc + d.imm) & XMASK
+        self.pc_modified = True
+        
 
     def _execute(self, d: DecodedInstr) -> None:
         # key(opcode, funct3, funct7) 

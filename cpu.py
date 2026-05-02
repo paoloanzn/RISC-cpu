@@ -52,6 +52,10 @@ def disasm(d: "DecodedInstr") -> str:
         return f"slti x{d.rd}, x{d.rs1}, {d.imm}"
     elif key == (0x13, 0x03, None):  # sltiu
         return f"sltiu x{d.rd}, x{d.rs1}, {d.imm}"
+    elif key == (0x13, 0x04, None):  # xori
+        return f"xori x{d.rd}, x{d.rs1}, {d.imm}"
+    elif key == (0x13, 0x06, None):  # ori
+        return f"ori x{d.rd}, x{d.rs1}, {d.imm}"
     elif key == (0x33, 0x00, 0x00):  # add
         return f"add x{d.rd}, x{d.rs1}, x{d.rs2}"
     elif key == (0x03, 0x00, None):  # lb
@@ -517,6 +521,16 @@ class CPU:
         if d.rd != 0:
             self.registers[d.rd] = value
 
+    # R[rd] = R[rs1]^imm
+    def _xori(self, d: DecodedInstr) -> None:
+        if d.rd != 0:
+            self.registers[d.rd] = self.registers[d.rs1] ^ d.imm
+
+    # R[rd] = R[rs1] | imm
+    def _ori(self, d: DecodedInstr) -> None:
+        if d.rd != 0:
+            self.registers[d.rd] = self.registers[d.rs1] | d.imm
+
     def _execute(self, d: DecodedInstr) -> None:
         # key(opcode, funct3, funct7) 
         mnemonic_lookup = {
@@ -539,6 +553,8 @@ class CPU:
             (0x67, 0x00, None): self._jarl,
             (0x13, 0x02, None): self._slti,
             (0x13, 0x03, None): self._sltiu,
+            (0x13, 0x04, None): self._xori,
+            (0x13, 0x06, None): self._ori,
 
             # branching
             (0x63, 0x00, None): self._beq,

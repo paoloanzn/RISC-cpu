@@ -48,6 +48,8 @@ Implemented Instructions
 - bgeu
 - slti
 - sltiu
+- xori
+- ori
 
 Tests
 ---

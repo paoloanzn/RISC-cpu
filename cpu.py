@@ -56,6 +56,14 @@ def disasm(d: "DecodedInstr") -> str:
         return f"xori x{d.rd}, x{d.rs1}, {d.imm}"
     elif key == (0x13, 0x06, None):  # ori
         return f"ori x{d.rd}, x{d.rs1}, {d.imm}"
+    elif key == (0x13, 0x07, None):  # andi
+        return f"andi x{d.rd}, x{d.rs1}, {d.imm}"
+    elif key == (0x13, 0x01, 0x00):  # slli
+        return f"slli x{d.rd}, x{d.rs1}, {d.imm & 0x3F}"
+    elif key == (0x13, 0x05, 0x00):  # srli
+        return f"srli x{d.rd}, x{d.rs1}, {d.imm & 0x3F}"
+    elif key == (0x13, 0x05, 0x20):  # srai
+        return f"srai x{d.rd}, x{d.rs1}, {d.imm & 0x3F}"
     elif key == (0x33, 0x00, 0x00):  # add
         return f"add x{d.rd}, x{d.rs1}, x{d.rs2}"
     elif key == (0x03, 0x00, None):  # lb
@@ -122,6 +130,10 @@ def disasm(d: "DecodedInstr") -> str:
 def sign_extend(value, bits) -> int:
     sign_bit = 1 << (bits - 1)
     return (value & (sign_bit -1)) - (value & sign_bit)
+
+
+def extract_bits(value: int, hi: int, lo: int) -> int:
+    return (value >> lo) & ((1 << ((hi - lo) + 1)) - 1)
 
 # Instruction Format
 # opcode bits[6:0]
@@ -212,9 +224,6 @@ class CPU:
             0b1100011: "SB", 
         }
 
-        def extract_bits(value: int, hi: int, lo: int) -> int:
-            return (value >> lo) & ((1 << ((hi - lo) + 1)) - 1)
-
         # mem_layout -> { "mem_region_name": extracted_value, ...}
         mem_layout_chunks = {
             "opcode": lambda x : extract_bits(x, 6, 0),
@@ -240,6 +249,12 @@ class CPU:
             d.funct3 = mem_layout_chunks["funct3"](raw)
             d.rs1    = mem_layout_chunks["rs1"](raw)
             d.imm    = sign_extend(extract_bits(raw, 31, 20), 12)
+            # For shift instructions (opcode 0x13, funct3 0x1/0x5), funct7 is in bits [31:26];
+            # bit 25 is shamt[5] in RV64. Shift left to reconstruct proper 7-bit funct7.
+            if d.opcode == 0x13 and d.funct3 in (0x1, 0x5):
+                d.funct7 = extract_bits(raw, 31, 26) << 1
+            else:
+                d.funct7 = None
 
         if d.instruction_format == "R":
             d.rd     = mem_layout_chunks["rd"](raw)
@@ -288,7 +303,7 @@ class CPU:
 
     # R[rd] = R[rs1] + imm
     def _addi(self, d: DecodedInstr) -> None:
-        self.registers[d.rd] = self.registers[d.rs1] + d.imm
+        self.registers[d.rd] = (self.registers[d.rs1] + d.imm) & XMASK
         return
 
     # R[rd] = R[rs1] + R[rs2]
@@ -531,6 +546,29 @@ class CPU:
         if d.rd != 0:
             self.registers[d.rd] = self.registers[d.rs1] | d.imm
 
+    # R[rd] = R[rs1] & imm
+    def _andi(self, d: DecodedInstr) -> None:
+        if d.rd != 0:
+            self.registers[d.rd] = (self.registers[d.rs1] & d.imm) & XMASK
+
+    # R[rd] = R[rs1]<<shamt
+    def _slli(self, d: DecodedInstr) -> None:
+        if d.rd != 0:
+            self.registers[d.rd] = (self.registers[d.rs1] << (d.imm & 0x3F)) & XMASK 
+
+    # R[rd] = R[rs1]>>shamt (logical, zero-fill)
+    def _srli(self, d: DecodedInstr) -> None:
+        if d.rd != 0:
+            self.registers[d.rd] = (self.registers[d.rs1] & XMASK) >> (d.imm & 0x3F)
+
+    # R[rd] = R[rs1]>>shamt (arithmetic)
+    def _srai(self, d: DecodedInstr) -> None:
+        if d.rd != 0:
+            val = self.registers[d.rs1]
+            # Convert to signed so Python's >> is arithmetic, then mask
+            val = sign_extend(val, 64)
+            self.registers[d.rd] = (val >> (d.imm & 0x3F)) & XMASK
+
     def _execute(self, d: DecodedInstr) -> None:
         # key(opcode, funct3, funct7) 
         mnemonic_lookup = {
@@ -555,6 +593,10 @@ class CPU:
             (0x13, 0x03, None): self._sltiu,
             (0x13, 0x04, None): self._xori,
             (0x13, 0x06, None): self._ori,
+            (0x13, 0x07, None): self._andi,
+            (0x13, 0x01, 0x00): self._slli,
+            (0x13, 0x05, 0x00): self._srli,
+            (0x13, 0x05, 0x20): self._srai,
 
             # branching
             (0x63, 0x00, None): self._beq,

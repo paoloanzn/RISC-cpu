@@ -50,6 +50,10 @@ Implemented Instructions
 - sltiu
 - xori
 - ori
+- andi
+- slli
+- srli
+- srai
 
 Tests
 ---
